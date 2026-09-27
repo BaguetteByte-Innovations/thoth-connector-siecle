@@ -1,0 +1,22 @@
+{
+  "Manifest": {
+    "Id": "siecle",
+    "Name": "Import SIECLE (Élèves)",
+    "Description": "Importer les élèves depuis un export SIECLE-BEE (Base Élèves Établissement) de l'Éducation nationale.",
+    "Fields": [
+      {
+        "Id": "siecle_zips",
+        "Label": "Fichiers d'export SIECLE (.zip)",
+        "Type": "file_multiple",
+        "IsRequired": true,
+        "Description": "Déposer les ZIP de l'export SIECLE-BEE. Seul « ExportXML_ElevesSansAdresses » est nécessaire ; les autres fichiers de l'export sont reconnus et ignorés."
+      }
+    ],
+    "SourcesAreComplementary": true
+  },
+  "Runtime": {
+    "Kind": "Native",
+    "Entry": "Thoth.Connectors.Siecle.exe",
+    "ExpectedSha256": null
+  }
+}

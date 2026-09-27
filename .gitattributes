@@ -1,0 +1,6 @@
+# Linux artifacts: LF mandatory in the worktree, whatever core.autocrlf is set to.
+# Without this, a Windows checkout (autocrlf=true) materializes these files in CRLF, and
+# `dotnet publish` copies the worktree bytes verbatim -> the systemd unit / shell scripts
+# ship to the customer in CRLF (systemd handles \r poorly: Environment=, ExecStartPre=).
+*.sh       text eol=lf
+*.service  text eol=lf

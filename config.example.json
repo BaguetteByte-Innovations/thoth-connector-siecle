@@ -1,0 +1,8 @@
+{
+  "autonomous": {
+    "enabled": false,
+    "ingestions": [
+      { "sources": [ { "url": "file:///C:/exports/SIECLE-BEE/ExportXML_ElevesSansAdresses.zip" } ] }
+    ]
+  }
+}

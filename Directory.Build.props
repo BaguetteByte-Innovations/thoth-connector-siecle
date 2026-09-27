@@ -1,0 +1,22 @@
+<Project>
+
+  <!--
+    Réglages de build du dépôt public autonome thoth-connector-siecle.
+    ThothStandalone=true fait référencer le contrat Thoth.Integration.Abstractions par son
+    paquet NuGet publié, au lieu d'une référence de projet.
+  -->
+
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- La version du connecteur vient des tags git du dépôt (MinVer) : rien à régler ici. -->
+
+    <ThothStandalone>true</ThothStandalone>
+    <!-- Version du paquet Thoth.Integration.Abstractions contre laquelle le connecteur se construit. -->
+    <ThothAbstractionsVersion>0.9.0</ThothAbstractionsVersion>
+
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+</Project>

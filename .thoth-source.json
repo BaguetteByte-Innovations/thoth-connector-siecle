@@ -1,0 +1,10 @@
+{
+  "about": "Fingerprint of the sources this snapshot was exported from. Thoth release notes use it to tell which version of this repository matches the copy embedded in the Thoth installers.",
+  "sources": [
+    {
+      "project": "Thoth.Connectors.Siecle",
+      "fingerprint": "sha256:986cd662eb63ee8632d66de446f6daf9d0e9f312f0c8fbb58659b0e37eb76397",
+      "clean": true
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net10.0-windows</TargetFramework>
+		<RootNamespace>Thoth.Connectors.Siecle</RootNamespace>
+		<!-- Version : ligne propre à ce connecteur, dérivée des tags git de son dépôt public
+		     (MinVer, build autonome uniquement). Dans le monorepo, build en version de développement. -->
+		<MinVerTagPrefix>v</MinVerTagPrefix>
+		<PublishAot>true</PublishAot>
+		<RuntimeIdentifier>win-x64</RuntimeIdentifier>
+		<Platforms>x64</Platforms>
+		<InvariantGlobalization>true</InvariantGlobalization>
+		<StripSymbols>true</StripSymbols>
+		<NoWarn>1701;1702;IDE0270;IDE0305</NoWarn>
+	</PropertyGroup>
+
+	<!-- Référence au contrat : PackageReference dans le dépôt public autonome, ProjectReference
+	     dans le monorepo. -->
+	<ItemGroup Condition="'$(ThothStandalone)' == 'true'">
+		<PackageReference Include="Thoth.Integration.Abstractions" VersionOverride="$(ThothAbstractionsVersion)" />
+	</ItemGroup>
+	<ItemGroup Condition="'$(ThothStandalone)' != 'true'">
+		<ProjectReference Include="..\Thoth.Integration.Abstractions\Thoth.Integration.Abstractions.csproj" />
+	</ItemGroup>
+
+	<!-- MinVer dérive la version des tags git du dépôt (build seul, rien à l'exécution : compatible
+	     AOT). Référencé seulement en build autonome. -->
+	<ItemGroup Condition="'$(ThothStandalone)' == 'true'">
+		<PackageReference Include="MinVer" PrivateAssets="all" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Update="manifest.json">
+	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+	  </None>
+	  <None Update="config.example.json">
+	    <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+	  </None>
+	</ItemGroup>
+</Project>

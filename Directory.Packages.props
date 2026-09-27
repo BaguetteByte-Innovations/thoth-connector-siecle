@@ -1,0 +1,17 @@
+<Project>
+
+  <!--
+    Gestion centralisée des versions de paquets : c'est elle qui fait prendre en compte la
+    référence au contrat (VersionOverride piloté par $(ThothAbstractionsVersion)). Seul MinVer
+    est épinglé ici (build seul : il dérive la version des tags git du dépôt).
+  -->
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="MinVer" Version="5.0.0" />
+  </ItemGroup>
+
+</Project>

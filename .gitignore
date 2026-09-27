@@ -1,0 +1,37 @@
+# --- SYSTEM & EDITORS ---
+.vs/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+.idea/
+.DS_Store
+Thumbs.db
+*.suo
+*.sw?
+.history/
+
+# --- .NET (Core & 10+) ---
+bin/
+obj/
+publish/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.user
+*.userosscache
+*.sln.docstates
+*.binlog
+
+# --- LOCAL DATABASES (SQLite) ---
+*.db
+*.db-shm
+*.db-wal
+
+# --- CONFIG & SECRETS ---
+*.local
+.env
+.env.*.local
+appsettings.Local.json
+logs/
+*.log

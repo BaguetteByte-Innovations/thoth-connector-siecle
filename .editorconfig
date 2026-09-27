@@ -1,0 +1,21 @@
+# Root of the repository: editor settings are not inherited from any parent folder.
+root = true
+
+# C# sources: UTF-8 without BOM (Roslyn's default; a BOM is a useless historical artifact).
+[*.cs]
+charset = utf-8
+
+# PowerShell scripts: UTF-8 WITH BOM is mandatory. Windows PowerShell 5.1 detects UTF-8
+# only via the BOM; without it, it falls back to the ANSI code page and corrupts accents.
+[*.ps1]
+charset = utf-8-bom
+
+# --- LINUX ARTIFACTS: LF line endings are MANDATORY ---
+# These files are copied as-is by `dotnet publish` to Linux machines: a .service in CRLF
+# makes systemd swallow \r (Environment=, ExecStartPre= get polluted), and a .sh in CRLF
+# breaks bash shebangs/conditions. Paired with .gitattributes (eol=lf at checkout): here we
+# stop the EDITOR (VS, VS Code, Rider) from reintroducing CRLF between two checkouts.
+[*.{sh,service}]
+end_of_line = lf
+charset = utf-8
+insert_final_newline = true

@@ -1,0 +1,127 @@
+# Publié en poussant un tag `vX.Y.Z`. La source de vérité est le monorepo : ne pas modifier ce
+# fichier dans le dépôt public.
+#
+# Construit le connecteur (Native AOT, win-x64) depuis ce tag, en fait le kit (exe + manifest.json +
+# config.example.json, à plat : il s'extrait tel quel dans connectors-ext/<id>/ de Thoth Engine) et
+# crée la release GitHub avec l'archive zip, ses empreintes et une attestation de provenance.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    # Link natif AOT win-x64 : il faut les outils C++ de Visual Studio du runner Windows.
+    runs-on: windows-latest
+    permissions:
+      contents: write      # créer la release
+      id-token: write      # jeton OIDC : attestation de provenance
+      attestations: write  # attestation de provenance
+    env:
+      PROJECT: Thoth.Connectors.Siecle
+      CONNECTOR_ID: siecle
+      ASSET_PREFIX: thoth-connector-siecle-windows-x64
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Vérifier le format du tag
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          if ($tag -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') {
+            Write-Output "::error::Le tag '$tag' n'est pas un tag de version (attendu : vX.Y.Z ou vX.Y.Z-suffixe)."
+            exit 1
+          }
+          $version = $tag.Substring(1)
+          "VERSION=$version" >> $env:GITHUB_ENV
+          "PRERELEASE=$(if ($version.Contains('-')) { 'true' } else { 'false' })" >> $env:GITHUB_ENV
+
+      # Historique complet : MinVer dérive la version des tags.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publier
+        run: |
+          dotnet publish "$($env:PROJECT).csproj" -c Release -r win-x64 -o kit -p:AllowedReferenceRelatedFileExtensions=none
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem kit -Filter *.pdb -Recurse | Remove-Item -Force
+
+      # Le csproj publie manifest.json et config.example.json : ce contrôle attrape le jour où il cesserait.
+      - name: Vérifier le contenu du kit
+        run: |
+          $root = (Resolve-Path kit).Path
+          $actual = @(Get-ChildItem kit -Recurse -File | ForEach-Object { $_.FullName.Substring($root.Length + 1) } | Sort-Object)
+          $expected = @("$($env:PROJECT).exe", 'manifest.json', 'config.example.json' | Sort-Object)
+          if (($actual -join '|') -ne ($expected -join '|')) {
+            Write-Output "::error::Le kit doit contenir exactement $($expected -join ', '). Il contient : $($actual -join ', ')."
+            exit 1
+          }
+
+      # MinVer (MinVerTagPrefix=v) inscrit dans l'exe la version du tag.
+      - name: Vérifier que le tag correspond à la version du connecteur
+        run: |
+          $productVersion = (Get-Item "kit/$($env:PROJECT).exe").VersionInfo.ProductVersion
+          if ($productVersion -ne $env:VERSION -and -not $productVersion.StartsWith("$($env:VERSION)+")) {
+            Write-Output "::error::Le tag $($env:GITHUB_REF_NAME) ne correspond pas à la version du connecteur, $productVersion."
+            exit 1
+          }
+
+      - name: Zipper le kit
+        run: |
+          $zip = "$($env:ASSET_PREFIX)-$($env:VERSION).zip"
+          Compress-Archive -Path kit/* -DestinationPath $zip
+          "ZIP=$zip" >> $env:GITHUB_ENV
+
+      - name: Version du contrat
+        run: |
+          $contract = (dotnet msbuild "$($env:PROJECT).csproj" -getProperty:ThothAbstractionsVersion).Trim()
+          if (-not $contract) { Write-Output "::error::ThothAbstractionsVersion est vide."; exit 1 }
+          "CONTRACT=$contract" >> $env:GITHUB_ENV
+
+      # Format sha256sum (hexadécimal minuscule, deux espaces, LF) : Set-Content écrirait des CRLF.
+      - name: Empreintes
+        run: |
+          $hash = (Get-FileHash $env:ZIP -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $PWD 'SHA256SUMS.txt'), "$hash  $($env:ZIP)`n")
+
+      - name: Attestation de provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: ${{ env.ZIP }}
+
+      - name: Notes de release
+        run: |
+          $notes = @'
+          ## __REPO__ __VERSION__
+
+          Construit contre `Thoth.Integration.Abstractions` __CONTRACT__ (https://www.nuget.org/packages/Thoth.Integration.Abstractions/__CONTRACT__).
+
+          ### Installation
+
+          Extraire l'archive dans `connectors-ext/__ID__/` du dossier d'installation de Thoth Engine (par défaut `C:\inetpub\Thoth\connectors-ext\__ID__\`), puis cliquer sur **Rafraîchir les connecteurs** dans la console de Thoth : aucun redémarrage n'est nécessaire. L'archive ne contient pas de `config.json` : l'extraire par-dessus un dossier existant garde les réglages de l'exploitant. Pour configurer le connecteur, copier `config.example.json` en `config.json`. Voir https://thoth-iam.com/docs/connectors/#installation.
+
+          ### Vérification
+
+          L'archive a été construite depuis ce tag par le workflow de release de ce dépôt.
+
+          - Empreinte : `sha256sum -c SHA256SUMS.txt`, ou en PowerShell `Get-FileHash __ZIP__ -Algorithm SHA256`, à comparer avec `SHA256SUMS.txt`.
+          - Provenance : `gh attestation verify __ZIP__ --repo __REPOSITORY__`.
+          '@
+          $notes = $notes.Replace('__REPOSITORY__', $env:GITHUB_REPOSITORY).Replace('__REPO__', $env:GITHUB_REPOSITORY.Split('/')[1]).Replace('__VERSION__', $env:VERSION).Replace('__CONTRACT__', $env:CONTRACT).Replace('__ID__', $env:CONNECTOR_ID).Replace('__ZIP__', $env:ZIP)
+          [IO.File]::WriteAllText((Join-Path $PWD 'notes.md'), $notes.Replace("`r`n", "`n"))
+
+      - name: Créer la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $releaseArgs = @($env:GITHUB_REF_NAME, $env:ZIP, 'SHA256SUMS.txt', '--title', "$($env:GITHUB_REPOSITORY.Split('/')[1]) $($env:VERSION)", '--notes-file', 'notes.md')
+          if ($env:PRERELEASE -eq 'true') { $releaseArgs += '--prerelease' }
+          gh release create @releaseArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
