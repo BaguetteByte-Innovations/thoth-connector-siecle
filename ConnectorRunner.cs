@@ -15,9 +15,6 @@ namespace Thoth.Connectors.Siecle;
 /// </summary>
 internal static class ConnectorRunner
 {
-    private const string NoElevesMessage =
-        "Aucun fichier élèves reconnu (racine BEE_ELEVES / ExportXML_ElevesSansAdresses) parmi les fichiers fournis.";
-
     public static async Task<int> RunAsync()
     {
         // Sans BOM dans les deux directions : pas de préfixe parasite sur les flux NDJSON.
@@ -81,24 +78,27 @@ internal static class ConnectorRunner
         }
 
         // Schéma fixe : SIECLE ne lit ni périmètre ni mapping sur ses sources, seulement leurs
-        // chemins — il identifie ses fichiers par leur CONTENU, jamais par leur nom.
-        string? elevesZip = SiecleParser.FindElevesZip([.. context.Sources.Select(s => s.PhysicalPath)]);
-        if (elevesZip is null)
+        // chemins — il identifie ses fichiers par leur CONTENU, jamais par leur nom. Une analyse
+        // porte une seule source : un fichier qui n'est pas un export élèves est refusé, nommé.
+        ConnectorSource elevesSource = context.Sources[0];
+        if (!SiecleParser.IsElevesZip(elevesSource.PhysicalPath))
         {
-            EmitInspectionResult(new InspectionResult(false, false, [], [], NoElevesMessage));
+            EmitInspectionResult(new InspectionResult(false, false, [], [],
+                $"« {SourceName(elevesSource)} » n'est pas l'export élèves de SIECLE-BEE (ExportXML_ElevesSansAdresses.zip) : retirer ce fichier du dépôt."));
             return 0;
         }
 
+        string elevesZip = elevesSource.PhysicalPath;
         try
         {
             Dictionary<string, SiecleParser.StructureInfo> structures =
-                SiecleParser.BuildStructureIndex(elevesZip, out string? scope);
+                SiecleParser.BuildStructureIndex(elevesZip, out string? scope, out DateOnly exportDate);
 
             // Schéma fixe : les clés de l'aperçu sont des identifiants de CIBLES (noms de propriétés
             // de ThothRawIdentity), jamais des intitulés d'affichage — la console les libelle dans sa
             // propre langue. Les valeurs restent des chaînes d'affichage (liste jointe par « , »).
             List<Dictionary<string, string>> sample = [];
-            foreach (ThothRawIdentity student in SiecleParser.StreamStudents(elevesZip, structures, scope))
+            foreach (ThothRawIdentity student in SiecleParser.StreamStudents(elevesZip, structures, scope, exportDate))
             {
                 sample.Add(new Dictionary<string, string>
                 {
@@ -125,7 +125,7 @@ internal static class ConnectorRunner
         }
         catch (Exception ex)
         {
-            EmitInspectionResult(new InspectionResult(false, false, [], [], $"Erreur d'analyse SIECLE : {ex.Message}"));
+            EmitInspectionResult(new InspectionResult(false, false, [], [], $"Erreur d'analyse SIECLE sur « {SourceName(elevesSource)} » : {ex.Message}"));
             return 0;
         }
     }
@@ -146,35 +146,50 @@ internal static class ConnectorRunner
         }
 
         // Schéma fixe : SIECLE ne lit ni périmètre ni mapping sur ses sources, seulement leurs
-        // chemins — il identifie ses fichiers par leur CONTENU, jamais par leur nom.
-        string? elevesZip = SiecleParser.FindElevesZip([.. context.Sources.Select(s => s.PhysicalPath)]);
-        if (elevesZip is null)
+        // chemins — il identifie ses fichiers par leur CONTENU, jamais par leur nom. Toutes les
+        // sources sont contrôlées AVANT la première identité : la première qui n'est pas un export
+        // élèves fait échouer le lancement, nommée.
+        foreach (ConnectorSource source in context.Sources)
         {
-            EmitIngestionResult(new IngestionResult(false, syncId, 0, 0, 0, NoElevesMessage));
-            return 0;
-        }
-
-        try
-        {
-            Dictionary<string, SiecleParser.StructureInfo> structures =
-                SiecleParser.BuildStructureIndex(elevesZip, out string? scope);
-
-            int processed = 0;
-            foreach (ThothRawIdentity identity in SiecleParser.StreamStudents(elevesZip, structures, scope))
+            if (!SiecleParser.IsElevesZip(source.PhysicalPath))
             {
-                EmitIdentity(identity);
-                processed++;
+                EmitIngestionResult(new IngestionResult(false, syncId, 0, 0, 0,
+                    $"« {SourceName(source)} » n'est pas l'export élèves de SIECLE-BEE (ExportXML_ElevesSansAdresses.zip) : retirer ce fichier des sources de l'import."));
+                return 0;
             }
+        }
 
-            EmitIngestionResult(new IngestionResult(true, syncId, processed, 0, 0));
-            return 0;
-        }
-        catch (Exception ex)
+        // Chaque export élèves est lu (un par école), dans l'ordre reçu.
+        int processed = 0;
+        foreach (ConnectorSource source in context.Sources)
         {
-            EmitIngestionResult(new IngestionResult(false, syncId, 0, 0, 0, $"Erreur d'ingestion SIECLE : {ex.Message}"));
-            return 0;
+            try
+            {
+                Dictionary<string, SiecleParser.StructureInfo> structures =
+                    SiecleParser.BuildStructureIndex(source.PhysicalPath, out string? scope, out DateOnly exportDate);
+
+                foreach (ThothRawIdentity identity in SiecleParser.StreamStudents(source.PhysicalPath, structures, scope, exportDate))
+                {
+                    EmitIdentity(identity);
+                    processed++;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Un export illisible fait échouer tout le lancement : le moteur abandonne le lot.
+                EmitIngestionResult(new IngestionResult(false, syncId, 0, 0, 0,
+                    $"Erreur d'ingestion SIECLE sur « {SourceName(source)} » : {ex.Message}"));
+                return 0;
+            }
         }
+
+        EmitIngestionResult(new IngestionResult(true, syncId, processed, 0, 0));
+        return 0;
     }
+
+    /// <summary>Nom d'origine d'une source pour les messages, à défaut le nom du fichier physique.</summary>
+    private static string SourceName(ConnectorSource source)
+        => string.IsNullOrWhiteSpace(source.OriginalName) ? Path.GetFileName(source.PhysicalPath) : source.OriginalName;
 
     // ==============================================================================
     // IO PROTOCOLAIRE (préfixes idy:/res:)

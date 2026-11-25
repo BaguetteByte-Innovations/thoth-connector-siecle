@@ -19,12 +19,16 @@ namespace Thoth.Connectors.Siecle;
 ///
 /// Spécificités SIECLE :
 /// - Source = un lot de ZIP, chacun contenant un unique XML (BEE_ELEVES, BEE_STRUCTURES…).
-///   Seul <c>ExportXML_ElevesSansAdresses</c> (racine <c>BEE_ELEVES</c>) est nécessaire ;
-///   on identifie le bon ZIP par sa racine XML, pas par son nom : un nom de fichier peut être
-///   renommé ou tronqué, il n'est pas une identité.
+///   Seul <c>ExportXML_ElevesSansAdresses</c> (racine <c>BEE_ELEVES</c>) est lu ; on le
+///   reconnaît par sa racine XML (<see cref="IsElevesZip"/>), pas par son nom : un nom de
+///   fichier peut être renommé ou tronqué, il n'est pas une identité.
+/// - Un lot peut porter plusieurs exports élèves, un par école : chacun est lu, avec l'école
+///   de son propre <c>PARAMETRES/UAJ</c>.
 /// - Un élève se recompose intra-fichier en joignant, sur <c>ELEVE_ID</c>, le bloc
 ///   &lt;ELEVES&gt; (identité civile) et le bloc &lt;STRUCTURES&gt; (classe + groupes de
-///   l'année en cours). On n'émet QUE les inscrits (division courante <c>TYPE_STRUCTURE="D"</c>).
+///   l'année en cours). On n'émet QUE les inscrits : division courante
+///   (<c>TYPE_STRUCTURE="D"</c>) et pas sortis à la date de l'export (<see cref="HasLeft"/> :
+///   <c>DATE_SORTIE</c> antérieure ou égale à <c>PARAMETRES/DATE_EXPORT</c>).
 /// - Encodage source <c>ISO-8859-15</c> (Latin-9), décodé via <c>CodePagesEncodingProvider</c>.
 /// </summary>
 internal static class SiecleParser
@@ -51,16 +55,9 @@ internal static class SiecleParser
     // ROUTAGE DES FICHIERS — par contenu (racine XML), jamais par nom de fichier
     // ==============================================================================
 
-    /// <summary>Chemin du premier ZIP dont le XML interne a pour racine BEE_ELEVES, sinon null.</summary>
-    public static string? FindElevesZip(IReadOnlyList<string> paths)
-    {
-        foreach (string path in paths)
-        {
-            if (string.Equals(TryReadXmlRoot(path), ElevesRootName, StringComparison.OrdinalIgnoreCase))
-                return path;
-        }
-        return null;
-    }
+    /// <summary>Vrai si le XML interne du ZIP a pour racine BEE_ELEVES (export élèves).</summary>
+    public static bool IsElevesZip(string path)
+        => string.Equals(TryReadXmlRoot(path), ElevesRootName, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Nom local de l'élément racine du XML contenu dans le ZIP (lecture du seul prologue).</summary>
     private static string? TryReadXmlRoot(string zipPath)
@@ -92,13 +89,18 @@ internal static class SiecleParser
 
     /// <summary>
     /// Passe 1 : indexe les inscriptions de l'année en cours (bloc &lt;STRUCTURES&gt;) et
-    /// récupère le RNE de l'école (PARAMETRES/UAJ → Scope). Saute les gros blocs
-    /// inutiles (&lt;ELEVES&gt;, &lt;OPTIONS&gt;…) sans les matérialiser.
+    /// récupère le RNE de l'école (PARAMETRES/UAJ → Scope) et la date de l'export
+    /// (PARAMETRES/DATE_EXPORT). Saute les gros blocs inutiles (&lt;ELEVES&gt;,
+    /// &lt;OPTIONS&gt;…) sans les matérialiser.
     /// </summary>
-    public static Dictionary<string, StructureInfo> BuildStructureIndex(string zipPath, out string? scope, CancellationToken ct = default)
+    /// <exception cref="InvalidDataException">DATE_EXPORT absente ou illisible.</exception>
+    public static Dictionary<string, StructureInfo> BuildStructureIndex(
+        string zipPath, out string? scope, out DateOnly exportDate, CancellationToken ct = default)
     {
         Dictionary<string, StructureInfo> index = new(StringComparer.Ordinal);
         scope = null;
+        DateOnly? readExportDate = null;
+        bool exportDateSeen = false;
 
         using ZipArchive archive = ZipFile.OpenRead(zipPath);
         ZipArchiveEntry entry = FindXmlEntry(archive)
@@ -123,6 +125,16 @@ internal static class SiecleParser
                 case "UAJ":
                     // RNE de l'école, sous PARAMETRES. On prend la première occurrence.
                     if (scope is null) scope = reader.ReadElementContentAsString();
+                    else reader.Skip();
+                    continue;
+
+                case "DATE_EXPORT":
+                    // Date de l'export, sous PARAMETRES. Première occurrence, comme UAJ.
+                    if (!exportDateSeen)
+                    {
+                        exportDateSeen = true;
+                        readExportDate = ParseSiecleDate(reader.ReadElementContentAsString());
+                    }
                     else reader.Skip();
                     continue;
 
@@ -164,16 +176,20 @@ internal static class SiecleParser
             }
         }
 
+        exportDate = readExportDate
+            ?? throw new InvalidDataException(
+                "DATE_EXPORT absente ou illisible dans PARAMETRES : impossible d'écarter les élèves sortis.");
         return index;
     }
 
     /// <summary>
     /// Passe 2 : streame le bloc &lt;ELEVES&gt;, joint chaque élève à son inscription
-    /// (<paramref name="structures"/>) et n'émet que les inscrits (division courante présente).
+    /// (<paramref name="structures"/>) et n'émet que les inscrits : division courante présente,
+    /// et pas sorti à la date de l'export (<see cref="HasLeft"/>).
     /// Un seul élève est matérialisé en mémoire à la fois.
     /// </summary>
     public static IEnumerable<ThothRawIdentity> StreamStudents(
-        string zipPath, IReadOnlyDictionary<string, StructureInfo> structures, string? scope)
+        string zipPath, IReadOnlyDictionary<string, StructureInfo> structures, string? scope, DateOnly exportDate)
     {
         using ZipArchive archive = ZipFile.OpenRead(zipPath);
         ZipArchiveEntry entry = FindXmlEntry(archive)
@@ -204,6 +220,11 @@ internal static class SiecleParser
                         || info.Division is null)
                         continue;
 
+                    // Filtre : sorti à la date de l'export (DATE_SORTIE <= DATE_EXPORT) → on n'émet pas,
+                    // même s'il garde une division. Une sortie annoncée (postérieure) ne l'écarte pas.
+                    if (HasLeft((string?)el.Element("DATE_SORTIE"), exportDate))
+                        continue;
+
                     yield return new ThothRawIdentity(
                         Role:                     UserRole.Student,
                         SourceId:                 (string?)el.Element("ID_NATIONAL"),     // INE national, clé de réconciliation
@@ -231,6 +252,13 @@ internal static class SiecleParser
             }
         }
     }
+
+    /// <summary>
+    /// Vrai si l'élève est sorti à la date de l'export : DATE_SORTIE lisible et antérieure ou égale
+    /// à DATE_EXPORT. Une DATE_SORTIE absente ou illisible vaut absente (GINO) : l'élève est inscrit.
+    /// </summary>
+    internal static bool HasLeft(string? rawLeavingDate, DateOnly exportDate)
+        => ParseSiecleDate(rawLeavingDate) is DateOnly leavingDate && leavingDate <= exportDate;
 
     /// <summary>Dates SIECLE au format dd/MM/yyyy → DateOnly?. Échec de parse → null (le moteur tranche).</summary>
     private static DateOnly? ParseSiecleDate(string? raw)

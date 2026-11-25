@@ -19,13 +19,15 @@ aux personnels (autres sources, autres connecteurs).
 
 ## Format d'entrée attendu
 
-- L'opérateur dépose les fichiers ZIP de son export SIECLE-BEE. Un seul sert :
-  `ExportXML_ElevesSansAdresses.zip` ; les autres sont reconnus et ignorés.
-- **Les fichiers déposés se lisent ensemble** : le connecteur retrouve le bon ZIP par son contenu
-  parmi tous les fichiers du lot (`SiecleParser.FindElevesZip`), pas par son nom. L'opérateur peut
-  donc déposer l'export complet sans le trier, et le manifeste le déclare —
-  `"SourcesAreComplementary": true` — pour que le moteur remette tous les fichiers en un seul appel,
-  à l'analyse comme à l'import.
+- L'opérateur dépose `ExportXML_ElevesSansAdresses.zip`, un par école, et non l'export SIECLE-BEE
+  entier.
+- **L'Engine analyse chaque fichier seul.** Le connecteur reconnaît un export élèves par son contenu
+  (`SiecleParser.IsElevesZip`), pas par son nom ; un fichier qui n'en est pas un est refusé à
+  l'analyse, nommé, et doit être retiré du dépôt.
+- **Plusieurs écoles peuvent être importées ensemble** : à l'ingestion, le connecteur reçoit tous les
+  fichiers en un seul lancement et lit chacun avec l'école de son propre `PARAMETRES/UAJ`. Il
+  contrôle toutes les sources avant d'émettre la première identité : un fichier qui n'est pas un
+  export élèves fait échouer le lancement, nommé.
 - Encodage source : **ISO-8859-15** (Latin-9).
 - Le parsing est **résistant aux attaques XXE** (DTD interdites) et lit le XML en deux passes sans le
   charger en entier — l'index des classes et groupes de l'année, puis les élèves un par un — pour
@@ -33,7 +35,10 @@ aux personnels (autres sources, autres connecteurs).
 
 Un élève est recomposé en joignant, sur `ELEVE_ID`, le bloc `<ELEVES>` (identité civile) et le bloc
 `<STRUCTURES>` (scolarité de l'année). **Seuls les inscrits courants sont émis** : un élève sans
-division courante (sortant) est ignoré.
+division courante (sortant) est ignoré, de même qu'un élève dont la date de sortie (`DATE_SORTIE`)
+est antérieure ou égale à la date de l'export (`PARAMETRES/DATE_EXPORT`), même s'il garde une
+division. Une date de sortie postérieure à l'export (sortie annoncée) ne l'écarte pas. Un export sans
+`DATE_EXPORT` lisible fait échouer l'import.
 
 ## Vocabulaire métier (pour un lecteur externe)
 

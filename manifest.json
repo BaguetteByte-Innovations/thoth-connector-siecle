@@ -6,13 +6,12 @@
     "Fields": [
       {
         "Id": "siecle_zips",
-        "Label": "Fichiers d'export SIECLE (.zip)",
+        "Label": "Exports élèves SIECLE (.zip)",
         "Type": "file_multiple",
         "IsRequired": true,
-        "Description": "Déposer les ZIP de l'export SIECLE-BEE. Seul « ExportXML_ElevesSansAdresses » est nécessaire ; les autres fichiers de l'export sont reconnus et ignorés."
+        "Description": "Déposer le fichier ExportXML_ElevesSansAdresses.zip de l'export SIECLE-BEE, un par école. Les autres fichiers de l'export ne sont pas lus : les retirer du dépôt."
       }
-    ],
-    "SourcesAreComplementary": true
+    ]
   },
   "Runtime": {
     "Kind": "Native",

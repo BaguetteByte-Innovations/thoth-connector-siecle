@@ -14,7 +14,7 @@
 
     <ThothStandalone>true</ThothStandalone>
     <!-- Version du paquet Thoth.Integration.Abstractions contre laquelle le connecteur se construit. -->
-    <ThothAbstractionsVersion>0.10.0</ThothAbstractionsVersion>
+    <ThothAbstractionsVersion>0.11.0</ThothAbstractionsVersion>
 
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
